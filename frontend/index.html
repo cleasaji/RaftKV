@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>RaftKV</title>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  :root { --bg:#0a0e13; --panel:#111823; --border:#1e2836; --text:#e6edf3; --muted:#8b98a5; --accent:#58a6ff; --leader:#3fb950; --isolated:#f85149; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:-apple-system,Segoe UI,Roboto,sans-serif; }
+  header { padding:18px 26px; border-bottom:1px solid var(--border); }
+  header h1 { margin:0; font-size:19px; }
+  .sub { color:var(--muted); font-size:12px; }
+  .container { padding:22px 26px; max-width:900px; margin:0 auto; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .nodes { display:grid; grid-template-columns:repeat(5, 1fr); gap:10px; }
+  .node { border:1px solid var(--border); border-radius:8px; padding:10px; text-align:center; font-size:12px; }
+  .node.leader { border-color:var(--leader); }
+  .node.isolated { opacity:0.4; border-style:dashed; }
+  .node .id { font-weight:700; font-size:14px; }
+  button { background:var(--accent); color:#0a0e13; border:none; padding:7px 12px; border-radius:6px; font-weight:600; cursor:pointer; margin:4px 4px 4px 0; font-size:12px; }
+  button.danger { background:var(--isolated); color:white; }
+  input { background:#0a0e13; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px; font-size:12px; margin-right:6px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+const API_BASE = "http://localhost:8000";
+const NODES = ["n1","n2","n3","n4","n5"];
+
+function App() {
+  const [status, setStatus] = useState(null);
+  const [key, setKey] = useState("foo");
+  const [value, setValue] = useState("bar");
+
+  async function refresh() {
+    const resp = await fetch(API_BASE + "/status");
+    setStatus(await resp.json());
+  }
+
+  async function elect(nodeId) {
+    await fetch(API_BASE + "/election", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({candidate_id: nodeId}) });
+    refresh();
+  }
+  async function toggleIsolate(nodeId, isolated) {
+    await fetch(API_BASE + (isolated ? "/heal" : "/isolate"), { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({node_id: nodeId}) });
+    refresh();
+  }
+  async function propose() {
+    await fetch(API_BASE + "/propose", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({op:"SET", key, value}) });
+    refresh();
+  }
+
+  useEffect(() => { refresh(); }, []);
+
+  return (
+    <div>
+      <header>
+        <h1>🗳️ RaftKV</h1>
+        <div className="sub">Distributed consensus key-value store — real Raft leader election + log replication</div>
+      </header>
+      <div className="container">
+        <div className="panel">
+          <div className="sub" style={{marginBottom: 8}}>Click a node to run an election with it as candidate. Toggle isolation to simulate a network partition.</div>
+          <div className="nodes">
+            {status && NODES.map(id => {
+              const n = status.nodes[id];
+              return (
+                <div className={"node " + (n.state === "leader" ? "leader" : "") + (n.isolated ? " isolated" : "")} key={id}>
+                  <div className="id">{id}</div>
+                  <div className="sub">{n.state}</div>
+                  <div className="sub">term {n.term} | log {n.log_length} | commit {n.commit_index}</div>
+                  <button onClick={() => elect(id)}>Elect</button>
+                  <button className="danger" onClick={() => toggleIsolate(id, n.isolated)}>{n.isolated ? "Heal" : "Isolate"}</button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="sub" style={{marginBottom: 8}}>Propose a SET to the current leader ({status?.current_leader || "none"}):</div>
+          <input value={key} onChange={e => setKey(e.target.value)} placeholder="key" />
+          <input value={value} onChange={e => setValue(e.target.value)} placeholder="value" />
+          <button onClick={propose}>Propose SET</button>
+          <div className="sub" style={{marginTop: 10}}>KV state: {JSON.stringify(status?.kv_data)}</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
